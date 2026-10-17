@@ -105,6 +105,7 @@ function pack(fields: string[], width: number): string[] {
 export interface FooterState {
   modelName?: string;
   thinkingLevel?: ExtensionContext["thinkingLevel"];
+  fast?: boolean;
   provider?: string;
   context?: ContextUsage;
   modelContextWindow?: number;
@@ -121,6 +122,7 @@ export function renderFooter(state: FooterState, width: number, paint: BarPaint 
   const info = [
     clippedLabel(cleanLabel(state.modelName || "unknown")),
     state.thinkingLevel ?? "?",
+    ...(state.fast && state.provider === "openai-codex" ? ["fast"] : []),
     contextLeft(state.context, state.modelContextWindow),
   ];
   const branch = cleanLabel(state.branch ?? "");

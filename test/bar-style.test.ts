@@ -141,7 +141,14 @@ test("real Pi dark/light Theme: final index composition preserves bright fill, m
   let currentTheme = loadThemeFromPath(fileURLToPath(new URL("modes/interactive/theme/dark.json", dist)), "truecolor");
   type FooterFactory = NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]>;
   let component: ReturnType<FooterFactory> | undefined;
-  const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+  const handlers = new Map<string, ((event: unknown, ctx: unknown) => unknown)[]>();
+  const fire = (name: string) => {
+    let result: unknown;
+    for (const handler of handlers.get(name) ?? []) {
+      result = result instanceof Promise ? result.then(() => handler({}, ctx)) : handler({}, ctx);
+    }
+    return result;
+  };
   const now = Date.now();
   const claims = { sub: "synthetic-user", exp: now / 1000 + 3600,
     "https://api.openai.com/auth": { chatgpt_account_id: "synthetic-account" } };
@@ -167,11 +174,14 @@ test("real Pi dark/light Theme: final index composition preserves bright fill, m
       },
     },
   };
-  statusbar({ on(name: string, handler: (event: unknown, context: unknown) => unknown) {
-    handlers.set(name, handler); return () => {};
-  } } as unknown as ExtensionAPI);
+  statusbar({ registerCommand() {}, on(name: string, handler: (event: unknown, context: unknown) => unknown) {
+    const list = handlers.get(name) ?? [];
+    list.push(handler);
+    handlers.set(name, list);
+    return () => {};
+  } } as unknown as ExtensionAPI, { load: async () => false, save: async () => {} });
   try {
-    handlers.get("session_start")?.({}, ctx);
+    await fire("session_start");
     await settle();
     assert.ok(component);
     let previous = "";
@@ -219,5 +229,5 @@ test("real Pi dark/light Theme: final index composition preserves bright fill, m
         assert.ok(compact.includes("]63%~") && compact.includes("]40%~"));
       }
     }
-  } finally { handlers.get("session_shutdown")?.({}, ctx); }
+  } finally { await fire("session_shutdown"); }
 });

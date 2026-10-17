@@ -1,9 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveIdentity, supported } from "./auth.ts";
+import { registerFast } from "./fast.ts";
+import type { FastPreferences } from "./fast-preferences.ts";
+import { ReadThrottle } from "./http.ts";
 import { UsageMonitor } from "./monitor.ts";
 import { paintBar, renderFooter } from "./render.ts";
 
-export default function statusbar(pi: ExtensionAPI): void {
+export default function statusbar(pi: ExtensionAPI, preferences?: FastPreferences): void {
   let active: {
     stop(): void;
     release(): void;
@@ -12,6 +15,8 @@ export default function statusbar(pi: ExtensionAPI): void {
     compacting: boolean;
   } | undefined;
 
+  const usageThrottle = new ReadThrottle(60_000);
+  const fast = registerFast(pi, () => active?.repaint(), preferences);
   const release = () => { active?.release(); };
 
   function mount(ctx: ExtensionContext): void {
@@ -26,7 +31,7 @@ export default function statusbar(pi: ExtensionAPI): void {
       const model = ctx.model;
       if (!model || !supported(model.provider)) return undefined;
       return resolveIdentity(model, ctx.modelRegistry, signal);
-    }, () => repaint());
+    }, () => repaint(), undefined, Date.now, usageThrottle);
     const syncModel = () => {
       const model = ctx.model;
       const next = JSON.stringify([model?.provider, model?.id, model?.api, model?.baseUrl]);
@@ -72,6 +77,7 @@ export default function statusbar(pi: ExtensionAPI): void {
           return renderFooter({
             modelName: ctx.model?.name,
             thinkingLevel: ctx.thinkingLevel,
+            fast: fast.effective(ctx),
             provider: ctx.model?.provider,
             context: running.compacting && context ? { ...context, tokens: null, percent: null } : context,
             modelContextWindow: ctx.model?.contextWindow,

@@ -161,6 +161,7 @@ test("failed quota/auth never replays a previous success; stale payload is hidde
   await monitor.poll(true); await flush();
   assert.equal(monitor.view().status, "unavailable");
   fail = false; monitor.invalidate();
+  time = 150000; // Failure backoff survives invalidation; retry only when it expires.
   await monitor.poll(); await flush();
   assert.equal(monitor.view().status, "ready");
   failAuth = true;
@@ -196,7 +197,7 @@ test("stop is idempotent and cancels pending auth/request without late notificat
 type FooterFactory = NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]>;
 type TestHandler = (event: unknown, context: unknown) => unknown;
 function harness() {
-  const handlers = new Map<string, TestHandler>();
+  const handlers = new Map<string, TestHandler[]>();
   let footer: ReturnType<FooterFactory> | undefined;
   let branch: string | null = "synthetic-branch";
   let factoryCount = 0, resets = 0, subscriptions = 0, renders = 0, authCalls = 0;
@@ -224,11 +225,25 @@ function harness() {
         });
     } },
   };
-  statusbar({ on(name: string, handler: TestHandler) { handlers.set(name, handler); return () => {}; } } as unknown as ExtensionAPI);
+  statusbar({
+    registerCommand() {},
+    on(name: string, handler: TestHandler) {
+      const list = handlers.get(name) ?? [];
+      list.push(handler);
+      handlers.set(name, list);
+      return () => {};
+    },
+  } as unknown as ExtensionAPI, { load: async () => false, save: async () => {} });
   return {
     context, handlers,
     setBranch(value: string | null) { branch = value; },
-    fire(name: string) { return handlers.get(name)?.({ type: name }, context); },
+    fire(name: string) {
+      let result: unknown;
+      for (const handler of handlers.get(name) ?? []) {
+        result = result instanceof Promise ? result.then(() => handler({ type: name }, context)) : handler({ type: name }, context);
+      }
+      return result;
+    },
     footer: () => { assert.ok(footer); return footer; },
     counts: () => ({ factoryCount, resets, subscriptions, renders, authCalls }),
   };

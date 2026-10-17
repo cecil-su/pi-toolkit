@@ -1,6 +1,6 @@
 import type { Identity } from "./auth.ts";
 import { parseCodex, parseDeepSeek, type Usage, type UsageView } from "./data.ts";
-import { requestJson } from "./http.ts";
+import { ReadThrottle, requestJson } from "./http.ts";
 
 export type ResolveIdentity = (signal: AbortSignal) => Promise<Identity | undefined>;
 export type ReadUsage = (identity: Identity, signal: AbortSignal) => Promise<unknown>;
@@ -28,6 +28,7 @@ export class UsageMonitor {
     private readonly changed: () => void,
     private readonly read: ReadUsage = readUsage,
     private readonly now: () => number = Date.now,
+    private readonly throttle: ReadThrottle = new ReadThrottle(60_000),
   ) {}
 
   view(): UsageView {
@@ -88,7 +89,9 @@ export class UsageMonitor {
       }
       this.verifiedAt = this.now();
       this.authExpiresAt = identity.expiresAt ?? Infinity;
-      if (!this.request && this.now() - this.lastAttempt >= 60_000) {
+      const allowed = this.throttle.allowed(identity.accountScope ?? identity.scope, this.now());
+      if (!allowed && !this.snapshot && !this.request) this.status = "unavailable";
+      if (!this.request && this.now() - this.lastAttempt >= 60_000 && allowed) {
         const request = new AbortController();
         this.request = request;
         this.lastAttempt = this.now();
@@ -125,8 +128,10 @@ export class UsageMonitor {
       this.verifiedAt = this.now();
       this.authExpiresAt = latest.expiresAt ?? Infinity;
       this.lastProbeAt = this.now();
-    } catch {
+      this.throttle.success(identity.accountScope ?? identity.scope);
+    } catch (error) {
       if (current()) {
+        this.throttle.failure(identity.accountScope ?? identity.scope, error, this.now());
         this.snapshot = undefined; // Failure is not zero, full, or an old successful value.
         this.status = "unavailable";
       }
