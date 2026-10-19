@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { parseCodex, parseDeepSeek, type UsageView } from "../src/data.ts";
 import { bar, cleanLabel, contextLeft, countdown, formatContextWindow, percent, renderFooter } from "../src/render.ts";
 
@@ -181,14 +181,71 @@ test("reset countdowns use absolute time and never infer a refreshed balance", (
   assert.doesNotMatch(lines.join("\n"), /63%|40%|100%/);
 });
 
-test("wide = one row, ordinary = two, narrower wraps whole fields/windows", () => {
-  const state = { modelName: "GPT Test", provider: "openai-codex", context: { tokens: 20, contextWindow: 100, percent: 20 },
+test("wide = one row, ordinary = two, narrower wraps whole fields/windows with branch always last", () => {
+  const state = { modelName: "GPT Test", thinkingLevel: "high" as const, fast: true, provider: "openai-codex",
+    context: { tokens: 20, contextWindow: 100, percent: 20 },
     branch: "main", view: { status: "ready", usage: parseCodex(root(), "synthetic-account") } as UsageView, now };
-  assert.equal(renderFooter(state, 200).length, 1);
-  assert.equal(renderFooter(state, 90).length, 2);
+  const info = "GPT Test | high | fast | ctx 80%/100";
+  const usage = "5h [██████▎   ] 63% ~4h8m | 7d [████      ] 40% ~4d15h | branch: main";
+  assert.deepEqual(renderFooter(state, 200), [`${info} | ${usage}`]);
+  assert.deepEqual(renderFooter(state, 90), [info, usage]);
   const narrow = renderFooter(state, 38);
   assert.ok(narrow.some((line) => line.startsWith("5h [") && line.endsWith("~4h8m")));
   assert.ok(narrow.some((line) => line.startsWith("7d [") && line.endsWith("~4d15h")));
+  assert.equal(narrow.at(-1), "branch: main");
+});
+
+test("long branches never hide or precede quota, balances or status at narrow, ordinary and wide widths", () => {
+  const codex = parseCodex(root(), "synthetic-account");
+  const deepseek = parseDeepSeek({ is_available: true, balance_infos: [
+    { currency: "CNY", total_balance: "110.001000" },
+    { currency: "USD", total_balance: "0.12345678901234567890" },
+  ] });
+  const cases: { provider: string; view: UsageView; fields: string[] }[] = [
+    { provider: "openai-codex", view: { status: "ready", usage: codex },
+      fields: ["5h[", "]63%~4h8m", "7d[", "]40%~4d15h"] },
+    { provider: "deepseek", view: { status: "ready", usage: deepseek },
+      fields: ["balanceCNY110.001000", "USD0.12345678901234567890"] },
+    { provider: "other", view: { status: "unsupported" }, fields: [] },
+    { provider: "deepseek", view: { status: "ready", usage: codex }, fields: ["DeepSeekunavailable"] },
+  ];
+  for (const provider of ["openai-codex", "deepseek"]) {
+    for (const status of ["loading", "unavailable", "stale", "unsupported"] as const) {
+      cases.push({ provider, view: { status }, fields: [`${provider === "openai-codex" ? "Codex" : "DeepSeek"}${status}`] });
+    }
+  }
+  const compact = (text: string) => stripTerminalSequences(text).replace(/[\s|]/g, "");
+  const longBranch = "feature/very-long-branch-name-".repeat(16);
+  const unicodeBranch = "feature/长分支-👩‍💻-e\u0301-".repeat(20);
+  const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
+  for (const { provider, view, fields } of cases) for (const branch of [undefined, "main", longBranch, unicodeBranch]) {
+    for (const width of [...Array.from({ length: 201 }, (_, i) => i), 600]) {
+      const state = { modelName: "M", thinkingLevel: "high" as const, fast: true, provider,
+        context: { tokens: 20, contextWindow: 500000, percent: 20 }, branch, view, now };
+      const lines = renderFooter(state, width);
+      const message = `${provider}/${view.status}, width ${width}, branch ${branch?.length ?? 0}`;
+      assert.ok(lines.every((line) => visibleWidth(line) <= width), message);
+      if (!width) { assert.deepEqual(lines, []); continue; }
+      for (const line of lines) assert.doesNotMatch(line, /^\s*\||\|\s*$|\|\s*\|/, message);
+      const text = compact(lines.join(""));
+      let offset = 0;
+      for (const field of ["M", "high", ...(provider === "openai-codex" ? ["fast"] : []), "ctx80%/500k", ...fields]) {
+        const index = text.indexOf(field, offset);
+        assert.ok(index >= offset, `${message}: missing/out-of-order ${field}`);
+        offset = index + field.length;
+      }
+      if (branch) {
+        const label = `branch: ${branch}`;
+        let clipped = visibleWidth(label) > width && width >= 8 ? truncateToWidth(label, width, "…") : label;
+        // A one-column terminal cannot retain CJK/emoji graphemes; all narrower glyphs still survive.
+        if (width === 1) clipped = [...graphemes.segment(label)]
+          .filter(({ segment }) => visibleWidth(segment) <= width).map(({ segment }) => segment).join("");
+        const baseline = compact(renderFooter({ ...state, branch: undefined }, width).join(""));
+        assert.equal(text, baseline + compact(clipped), message);
+      } else assert.doesNotMatch(text, /branch:/, message);
+      if (width === 600) assert.equal(lines.length, 1, message);
+    }
+  }
 });
 
 test("all Unicode widths fit, control codes are stripped and foreign provider data is hidden", () => {

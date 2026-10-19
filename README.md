@@ -1,6 +1,6 @@
 # pi-toolkit
 
-Pi package：用自定义 footer 显示当前模型、剩余上下文、Git 分支，以及当前 Codex 账户额度或 DeepSeek API 余额；提供原创 `/fast` 切换已验证支持的 Codex Fast 请求策略。MIT，无第三方运行时依赖，不复制或加载其它状态栏插件实现。
+Pi package：用自定义 footer 显示当前模型、思考程度、剩余上下文、当前 Codex 账户额度或 DeepSeek API 余额，以及末尾的 Git 分支；提供原创 `/fast` 切换已验证支持的 Codex Fast 请求策略。MIT，无第三方运行时依赖，不复制或加载其它状态栏插件实现。
 
 ## 安装与使用
 
@@ -64,27 +64,27 @@ GPT Display Name | high | fast | ctx 80%/500k
 
 ## 显示
 
-普通宽度按两组分行，宽屏合为一行；更窄时按完整字段/额度窗口换行：
+字段顺序为模型 / thinking / fast（生效时）/ ctx / 额度或余额 / branch。普通宽度按信息组和额度/余额及分支组分行，宽屏合为一行；更窄时按完整字段/额度窗口换行，branch 始终位于所有可见字段最后：
 
 ```text
-GPT Display Name | high | ctx 80%/500k | branch: main
-5h [██████▎   ] 63% ~4h8m | 7d [████      ] 40% ~4d15h
+GPT Display Name | high | ctx 80%/500k
+5h [██████▎   ] 63% ~4h8m | 7d [████      ] 40% ~4d15h | branch: main
 ```
 
 DeepSeek 第二组示例：
 
 ```text
-balance CNY 110.00100 | USD 20.00000001
+balance CNY 110.00100 | USD 20.00000001 | branch: main
 ```
 
 - 模型显示名称取自当前 runtime 的 `ctx.model.name`，不维护模型名称表。其后独立显示 `ctx.thinkingLevel`（如 `high` / `off`），思考程度切换事件立即重绘；长模型名省略不影响该字段，未知显示 `?`。
 - `ctx` 百分比仍表示剩余比例，即 `100 - ctx.getContextUsage().percent`，不是已用比例；格式为 `ctx 100%/500k`，压缩中、压缩后尚无估计或缺失数据为 `ctx ?/500k`（窗口也未知时为 `ctx ?/?`）。`/` 后显示上下文窗口总长度，优先取 `getContextUsage().contextWindow`，未知时回退当前 `model.contextWindow`，都未知为 `?`。总长度按十进制 k/M 紧凑显示、最多两位小数，例如 `272k`、`500k`、`1.05M`；压缩后百分比未知时仍保留已知窗口。此项是 runtime 上下文窗口估计，不扣除额外保留 token，也不是账户额度。
-- 分支使用官方只读 footer data provider；非 Git 目录或空白/无有效分支值时隐藏整个 branch 字段及其分隔符。有值显示 `branch: NAME`，detached HEAD 按宿主返回值显示。不执行 Git 写操作。
+- 分支使用官方只读 footer data provider；非 Git 目录或空白/无有效分支值时隐藏整个 branch 字段及其分隔符。有值显示 `branch: NAME`，始终排在额度、余额或状态字段之后；没有额度/余额时也位于末尾。长分支沿用标签省略和字段换行，不隐藏前面的模型、thinking、fast、ctx 或额度/余额。detached HEAD 按宿主返回值显示。不执行 Git 写操作。
 - Codex 使用响应根部 `rate_limit` 中实际时长为 18000/604800 秒的**账户**窗口。不是当前模型专属额度；`additional_rate_limits` 的 opaque feature 不被猜测、合并或替换为模型 ID。特殊模型还可能有本包不显示的独立限制。
 - bar 与百分比使用同一个剩余值；bar 每格分 8 级，四舍五入到最近 1/8 格，默认 10 格、窄屏最低 2 格。整段 bar 体使用统一暗色背景轨道和亮色填充，空余区用空格，部分格右侧也显示同一轨道，不使用 `░`；上方纯文本示例无法展示底色。背景只覆盖括号内的 bar 体，0% 仍有完整轨道，100% 填满；换行保留空格并恢复/重置样式，不给括号或整行铺底。每次渲染读取当前主题，使用官方 Theme/style 和颜色 API 适配浅色/深色及 truecolor/ANSI256，不缓存带旧主题颜色的字符串。百分比最多两位小数，极小/极大非端点值用 `<0.01%` / `>99.99%`，避免四舍五入伪装成 0/100。
 - 倒计时根据服务端绝对 `reset_at`，按分钟/小时向下取整，少于一分钟为 `~<1m`，缺失为 `~?`。到期为 `reset due`，立即隐藏旧百分比和 bar，不自行填充为满额。
 - DeepSeek 只显示官方 `total_balance`，每个返回的 CNY/USD 分别显示；原始十进制字符串不转浮点、不相加、不换汇。不显示百分比、bar 或重置时间；余额本身不保证 API 请求一定可用。
-- ready Codex 结果只显示实际返回的 5h/7d 窗口，缺失窗口不展示；返回窗口为 0% 时仍显示。没有可解析的受支持窗口会令整次查询失败，整体 loading/unavailable/stale 仍明确显示；失败不保留旧成功值，不把错误当作无限额，也不用 0 或满额代替。其它 provider 只显示第一组。
+- ready Codex 结果只显示实际返回的 5h/7d 窗口，缺失窗口不展示；返回窗口为 0% 时仍显示。没有可解析的受支持窗口会令整次查询失败，整体 loading/unavailable/stale 仍明确显示；失败不保留旧成功值，不把错误当作无限额，也不用 0 或满额代替。其它 provider 不显示额度/余额，分支仍位于最后。
 - Unicode 宽度使用宿主 TUI 工具测量；超长模型名称/分支会省略。一个字段本身超过终端宽度时才在字段内部换行；极窄到无法容纳单个宽字符时会裁掉该字符以防溢出，金额数字不做四舍五入。终端字体须支持 Unicode block glyph。
 
 ## 数据、安全与生命周期
@@ -119,7 +119,7 @@ npm test
 npm pack --dry-run --ignore-scripts
 ```
 
-所有 HTTP/认证/账号切换测试使用合成数据和 mock，不调用真实账户接口或模型，也不开服务。持久化测试使用 `os.tmpdir()`，运行时可将 TEMP/TMP/TMPDIR 指向专用测试工作目录；测试保留生成目录。覆盖渲染与 Unicode 宽度、bar 边界、统一背景与空格、真实 Pi dark/light Theme 下的最终 footer 组合、ANSI256、主题切换、窄屏样式恢复/重置和信息保留、ctx unknown/compaction 与窗口总长度优先/回退、thinking 事件重绘、空分支与缺失窗口隐藏及分隔符、倒计时、账户根窗口与无关专属桶、币种精度、超时/取消/超大/错误/重定向、scope 切换和生命周期清理，以及 Fast 能力解析、仅布尔偏好保存、失败/关闭并发、多 handler 真实组合、非 TUI 隔离、请求级 A/B 身份与实际 custom endpoint、同 ID 并发、full/simple 参数及注册恢复、Retry-After/连续失败退避和恢复。真实 Pi 1.3.0 Runtime 与 compiled pi.exe 的合成请求验证均使用隔离凭据及拦截的 fetch，不产生真实服务请求。Codex 额度和 DeepSeek 余额已通过真实终端显示验证，但未与供应商页面核对。Fast 验证未查询真实 Codex 目录/账户接口，也未发送真实 Fast 模型请求；Fast 的实际可用性、速度及额度消耗均未实测，需另行验证。测试通过不代表业务验收。
+所有 HTTP/认证/账号切换测试使用合成数据和 mock，不调用真实账户接口或模型，也不开服务。持久化测试使用 `os.tmpdir()`，运行时可将 TEMP/TMP/TMPDIR 指向专用测试工作目录；测试保留生成目录。覆盖渲染与 Unicode 宽度、bar 边界、统一背景与空格、真实 Pi dark/light Theme 下的最终 footer 组合、ANSI256、主题切换、窄屏样式恢复/重置和信息保留、ctx unknown/compaction 与窗口总长度优先/回退、thinking 事件重绘、空分支与缺失窗口隐藏及分隔符、长分支在窄/普通/宽屏下全局最后且不隐藏额度/多币种余额/错误状态、倒计时、账户根窗口与无关专属桶、币种精度、超时/取消/超大/错误/重定向、scope 切换和生命周期清理，以及 Fast 能力解析、仅布尔偏好保存、失败/关闭并发、多 handler 真实组合、非 TUI 隔离、请求级 A/B 身份与实际 custom endpoint、同 ID 并发、full/simple 参数及注册恢复、Retry-After/连续失败退避和恢复。真实 Pi 1.3.0 Runtime 与 compiled pi.exe 的合成请求验证均使用隔离凭据及拦截的 fetch，不产生真实服务请求。Codex 额度和 DeepSeek 余额已通过真实终端显示验证，但未与供应商页面核对。Fast 验证未查询真实 Codex 目录/账户接口，也未发送真实 Fast 模型请求；Fast 的实际可用性、速度及额度消耗均未实测，需另行验证。测试通过不代表业务验收。
 
 `@earendil-works/pi-coding-agent`、`pi-ai`、`pi-tui`（均为 `@earendil-works` scope）与 `typebox` 仅以 `peerDependencies: "*"` 声明；本地 devDependencies 固定宿主 1.3.0 供类型检查，不包含在发布文件中。Pi 通过自己的 loader 提供宿主模块，本包不打包宿主或其它 Pi package。没有依赖其它状态栏/usage package，因此没有额外插件自动加载或格式化状态协议耦合。
 

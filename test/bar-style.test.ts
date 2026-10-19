@@ -157,6 +157,7 @@ test("real Pi dark/light Theme: final index composition preserves bright fill, m
     primary_window: { used_percent: 37, limit_window_seconds: 18000, reset_at: Math.floor(now / 1000) + 14880 },
     secondary_window: { used_percent: 60, limit_window_seconds: 604800, reset_at: Math.floor(now / 1000) + 399600 },
   } })));
+  let branch = "main";
   const ctx = {
     mode: "tui",
     model: { provider: "openai-codex", id: "synthetic-model", name: "M", api: "openai-codex-responses",
@@ -168,7 +169,7 @@ test("real Pi dark/light Theme: final index composition preserves bright fill, m
       setFooter(factory: FooterFactory | undefined) {
         component?.dispose?.();
         component = factory?.({ requestRender() {} } as Parameters<FooterFactory>[0], currentTheme, {
-          getGitBranch: () => "main", onBranchChange: () => () => {},
+          getGitBranch: () => branch, onBranchChange: () => () => {},
           getExtensionStatuses: () => new Map(), getAvailableProviderCount: () => 1,
         });
       },
@@ -187,6 +188,8 @@ test("real Pi dark/light Theme: final index composition preserves bright fill, m
     let previous = "";
     for (const mode of ["truecolor", "256color"] as const) for (const name of ["dark", "light"]) {
       currentTheme = loadThemeFromPath(fileURLToPath(new URL(`modes/interactive/theme/${name}.json`, dist)), mode);
+      ctx.model.name = "M";
+      branch = "main";
       component.invalidate();
       const wide = component.render(200).join("");
       assert.notEqual(wide, previous);
@@ -195,7 +198,9 @@ test("real Pi dark/light Theme: final index composition preserves bright fill, m
       if (mode === "256color") assert.ok(!wide.includes("[38;2;") && !wide.includes("[48;2;"));
       const muted = scan(currentTheme.fg("muted", "x")).glyphs[0];
       const fill = scan(paintBar(bar(63), currentTheme)).glyphs[0].fg;
-      for (let width = 0; width <= 200; width++) {
+      for (const longLabels of [false, true]) for (let width = 0; width <= 200; width++) {
+        ctx.model.name = longLabels ? "very-long-model-name-".repeat(16) : "M";
+        branch = longLabels ? "feature/very-long-branch-name-".repeat(16) : "main";
         const lines = component.render(width);
         assert.ok(lines.every((line) => visibleWidth(line) <= width));
         if (!width) { assert.deepEqual(lines, []); continue; }
@@ -214,18 +219,19 @@ test("real Pi dark/light Theme: final index composition preserves bright fill, m
         const bodies = [...plain.matchAll(/\[([█▏▎▍▌▋▊▉ ]+)\]/g)];
         assert.equal(bodies.length, 2);
         for (const match of bodies) for (let i = match.index + 1; i <= match.index + match[1].length; i++) covered.add(i);
-        const quotaStart = plain.indexOf("5h");
-        assert.ok(quotaStart >= 0);
+        assert.ok(plain.includes("5h"));
         glyphs.forEach((cell, i) => {
           assert.equal(cell.bg !== undefined, covered.has(i));
-          if (i >= quotaStart && !covered.has(i)) {
+          if (!covered.has(i)) {
             assert.equal(cell.fg, muted.fg, `text color at width ${width}: ${cell.char}`);
             assert.equal(cell.dim, muted.dim);
           }
         });
         const compact = plain.replace(/\s/g, "");
         assert.ok(compact.includes("ctx75%/100"));
-        if (width < 8 || width >= 12) assert.ok(compact.includes("branch:main"));
+        if (!longLabels && (width < 8 || width >= 12)) assert.ok(compact.includes("branch:main"));
+        if (longLabels && width >= 8) assert.ok(compact.endsWith("…"));
+        assert.ok(compact.indexOf("branch:") > compact.indexOf("]40%~"));
         assert.ok(compact.includes("]63%~") && compact.includes("]40%~"));
       }
     }

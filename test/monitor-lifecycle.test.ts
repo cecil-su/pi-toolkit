@@ -268,7 +268,7 @@ test("footer reload/replacement/shutdown clears timers, requests, subscriptions 
   assert.equal(fetchCalls, 1);
   assert.equal(h.counts().subscriptions, 1);
   const first = h.footer();
-  assert.match(first.render(200).join(" "), /Runtime Name 测试.*ctx 75%\/100.*synthetic-branch.*CNY 123.4500/);
+  assert.match(first.render(200).join(" "), /Runtime Name 测试.*ctx 75%\/100.*CNY 123.4500.*branch: synthetic-branch$/);
   h.fire("session_before_compact");
   assert.match(first.render(200).join(" "), /ctx \?\/100/);
   h.context.getContextUsage = () => ({ tokens: null, contextWindow: 100, percent: null });

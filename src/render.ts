@@ -117,8 +117,9 @@ export interface FooterState {
 export function renderFooter(state: FooterState, width: number, paint: BarPaint = unpainted): string[] {
   width = Math.max(0, Math.floor(width));
   if (!width) return [];
+  // Labels stay plain text so truncation resets cannot override the outer text color.
   const clippedLabel = (label: string) => visibleWidth(label) > width && width >= 8
-    ? truncateToWidth(label, width, "…") : label;
+    ? stripTerminalSequences(truncateToWidth(label, width, "…")) : label;
   const info = [
     clippedLabel(cleanLabel(state.modelName || "unknown")),
     state.thinkingLevel ?? "?",
@@ -126,7 +127,6 @@ export function renderFooter(state: FooterState, width: number, paint: BarPaint 
     contextLeft(state.context, state.modelContextWindow),
   ];
   const branch = cleanLabel(state.branch ?? "");
-  if (branch) info.push(clippedLabel(`branch: ${branch}`));
   const usage: string[] = [];
   const view = state.view;
   if (view.status === "ready" && view.usage.provider === state.provider) {
@@ -142,6 +142,7 @@ export function renderFooter(state: FooterState, width: number, paint: BarPaint 
     const label = state.provider === "openai-codex" ? "Codex" : "DeepSeek";
     usage.push(`${label} ${view.status === "ready" ? "unavailable" : view.status}`);
   }
+  if (branch) usage.push(clippedLabel(`branch: ${branch}`));
   const all = [...info, ...usage].join(" | ");
   if (visibleWidth(all) <= width) return [all];
   // Keep the two semantic groups on separate rows at ordinary terminal widths.
