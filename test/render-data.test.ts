@@ -181,18 +181,57 @@ test("reset countdowns use absolute time and never infer a refreshed balance", (
   assert.doesNotMatch(lines.join("\n"), /63%|40%|100%/);
 });
 
-test("wide = one row, ordinary = two, narrower wraps whole fields/windows with branch always last", () => {
+test("fields fill rows continuously, wrapping whole fields/windows with branch always last", () => {
   const state = { modelName: "GPT Test", thinkingLevel: "high" as const, fast: true, provider: "openai-codex",
     context: { tokens: 20, contextWindow: 100, percent: 20 },
     branch: "main", view: { status: "ready", usage: parseCodex(root(), "synthetic-account") } as UsageView, now };
   const info = "GPT Test | high | fast | ctx 80%/100";
-  const usage = "5h [██████▎   ] 63% ~4h8m | 7d [████      ] 40% ~4d15h | branch: main";
-  assert.deepEqual(renderFooter(state, 200), [`${info} | ${usage}`]);
-  assert.deepEqual(renderFooter(state, 90), [info, usage]);
+  const fiveHour = "5h [██████▎   ] 63% ~4h8m";
+  const sevenDay = "7d [████      ] 40% ~4d15h";
+  assert.deepEqual(renderFooter(state, 200), [`${info} | ${fiveHour} | ${sevenDay} | branch: main`]);
+  assert.deepEqual(renderFooter(state, 90), [`${info} | ${fiveHour}`, `${sevenDay} | branch: main`]);
   const narrow = renderFooter(state, 38);
   assert.ok(narrow.some((line) => line.startsWith("5h [") && line.endsWith("~4h8m")));
   assert.ok(narrow.some((line) => line.startsWith("7d [") && line.endsWith("~4d15h")));
   assert.equal(narrow.at(-1), "branch: main");
+});
+
+test("single 7d, dual windows and multiple currencies wrap only at the current field's width boundary", () => {
+  const cases = [
+    { name: "single 7d", provider: "openai-codex", usage: parseCodex({ rate_limit: {
+      primary_window: window(604800, 60, now / 1000 + 399600),
+    } }, "synthetic-account"), fields: ["7d [████      ] 40% ~4d15h"] },
+    { name: "dual windows", provider: "openai-codex", usage: parseCodex(root(), "synthetic-account"),
+      fields: ["5h [██████▎   ] 63% ~4h8m", "7d [████      ] 40% ~4d15h"] },
+    { name: "multiple currencies", provider: "deepseek", usage: parseDeepSeek({ is_available: true, balance_infos: [
+      { currency: "CNY", total_balance: "110.00100" }, { currency: "USD", total_balance: "20.00000001" },
+    ] }), fields: ["balance CNY 110.00100", "USD 20.00000001"] },
+  ];
+  for (const { name, provider, usage, fields } of cases) {
+    const state = { modelName: "Synthetic 模型", thinkingLevel: "high" as const, fast: true, provider,
+      context: { tokens: 20, contextWindow: 500000, percent: 20 },
+      branch: "feature/synthetic-footer-layout-long-branch",
+      view: { status: "ready" as const, usage }, now };
+    const info = [state.modelName, "high", ...(provider === "openai-codex" ? ["fast"] : []), "ctx 80%/500k"];
+    const branch = `branch: ${state.branch}`;
+    const all = [...info, ...fields, branch].join(" | ");
+    for (let index = 0; index < fields.length; index++) {
+      const before = [...info, ...fields.slice(0, index)].join(" | ");
+      const through = `${before} | ${fields[index]}`;
+      const exactWidth = visibleWidth(through);
+      for (const width of [exactWidth - 1, exactWidth]) {
+        const lines = renderFooter(state, width);
+        assert.equal(lines[0], width === exactWidth ? through : before, `${name} at ${width}`);
+        assert.equal(lines.join(" | "), all, `${name}: fields preserved at ${width}`);
+        assert.ok(lines.every((line) => visibleWidth(line) <= width));
+        assert.ok(lines.at(-1)?.endsWith(branch));
+      }
+    }
+    const allWidth = visibleWidth(all);
+    assert.deepEqual(renderFooter(state, allWidth - 1), [[...info, ...fields].join(" | "), branch], name);
+    assert.deepEqual(renderFooter(state, allWidth), [all], name);
+    assert.deepEqual(renderFooter(state, allWidth + 1), [all], name);
+  }
 });
 
 test("long branches never hide or precede quota, balances or status at narrow, ordinary and wide widths", () => {

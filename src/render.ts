@@ -143,8 +143,5 @@ export function renderFooter(state: FooterState, width: number, paint: BarPaint 
     usage.push(`${label} ${view.status === "ready" ? "unavailable" : view.status}`);
   }
   if (branch) usage.push(clippedLabel(`branch: ${branch}`));
-  const all = [...info, ...usage].join(" | ");
-  if (visibleWidth(all) <= width) return [all];
-  // Keep the two semantic groups on separate rows at ordinary terminal widths.
-  return [...pack(info, width), ...pack(usage, width)];
+  return pack([...info, ...usage], width);
 }
