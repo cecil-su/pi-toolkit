@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveIdentity, supported } from "./auth.ts";
+import { registerDeepSeekTools } from "./deepseek-tools.ts";
 import { registerFast } from "./fast.ts";
 import type { FastPreferences } from "./fast-preferences.ts";
 import { ReadThrottle } from "./http.ts";
@@ -7,6 +8,7 @@ import { UsageMonitor } from "./monitor.ts";
 import { paintBar, renderFooter } from "./render.ts";
 
 export default function statusbar(pi: ExtensionAPI, preferences?: FastPreferences): void {
+  registerDeepSeekTools(pi);
   let active: {
     stop(): void;
     release(): void;

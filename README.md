@@ -1,6 +1,6 @@
 # pi-toolkit
 
-Pi package：用自定义 footer 显示当前模型、思考程度、剩余上下文、当前 Codex 账户额度或 DeepSeek API 余额，以及末尾的 Git 分支；提供原创 `/fast` 切换已验证支持的 Codex Fast 请求策略。MIT，无第三方运行时依赖，不复制或加载其它状态栏插件实现。
+Pi package：用自定义 footer 显示当前模型、思考程度、剩余上下文、当前 Codex 账户额度或 DeepSeek API 余额，以及末尾的 Git 分支；提供原创 `/fast` 切换已验证支持的 Codex Fast 请求策略，以及原生模型工具 `deepseek_search` / `deepseek_fetch`。MIT，无第三方运行时依赖，不复制或加载其它状态栏插件实现。
 
 ## 安装与使用
 
@@ -16,7 +16,7 @@ pi install --local git:github.com/cecil-su/pi-toolkit
 pi install --local /path/to/pi-toolkit
 ```
 
-安装命令会修改该项目的 Pi package 声明；本包不修改 Pi 加载配置，仅由 `/fast` 保存本包的 `pi-toolkit.json` 偏好。进入交互 TUI 后自动生效，`/reload` 重新加载。JSON、RPC、print 模式不创建 footer、timer 或额度请求；也不读取 Fast 偏好、不查 Fast 目录、不执行 Fast 切换或改写请求。Fast 不覆盖其它插件的 RPC/非交互能力。
+安装命令会修改该项目的 Pi package 声明；本包不修改 Pi 加载配置，仅由 `/fast` 保存本包的 `pi-toolkit.json` 偏好。进入交互 TUI 后自动生效，`/reload` 重新加载。JSON、RPC、print 模式不创建 footer、timer 或额度请求；也不读取 Fast 偏好、不查 Fast 目录、不执行 Fast 切换或改写请求。Fast 不覆盖其它插件的 RPC/非交互能力。Search/Fetch 工具在 TUI、print、JSON、RPC 均可显式调用；工具注册及生命周期事件不触发其认证或联网。
 
 已有扩展若也调用 `setFooter()`，两者会竞争，最后设置者生效。本包不解析其它扩展的状态文本、不修改它们的配置，也不恢复或停用其它插件。自己的 footer 被替换时会停止 footer/额度资源；Fast 策略独立存续至退出/重载，不随 footer 替换停止，其额外轮询仅在偏好开启时运行。退出/重载时恢复内置 footer（仅当本包仍持有 footer）。
 
@@ -31,6 +31,46 @@ env -u DEEPSEEK_API_KEY PI_CODING_AGENT_DIR=/path/to/empty-agent \
 ```
 
 只查看 UI，不输入模型请求或登录真实账户。没有凭据时额度显示 unavailable。`--offline` 只控制 Pi 自身自动联网，并不是扩展 HTTP 的全局防火墙；本包测试通过 mock 注入拦截 HTTP，不依赖该参数阻止请求。
+
+## DeepSeek Search / Fetch（原生模型工具）
+
+本包注册 `deepseek_search` 和 `deepseek_fetch`，不新增 MCP、依赖、登录系统、Key 文件或全局配置，不替换 `codex_web_search`。工具在 TUI、print、JSON、RPC 中均可用，只有显式工具执行才解析认证和发起 POST；不需要把当前 GPT/其它模型切换成 DeepSeek。
+
+| 工具 | 参数 | 输出 |
+|---|---|---|
+| `deepseek_search` | `query`：1–128 个 Unicode 字符，不能全为空白或含控制字符；`count`：整数 1–50，本工具默认 5 | 标题、完整来源 URL、摘要（summary 为空时使用 snippet）及截断标记 |
+| `deepseek_fetch` | `url`：公开 HTTP(S) URL，不超过 8192 字符（规范化后也须满足），不允许 userinfo | 来源 URL、title、Markdown content 及截断标记 |
+
+合成工具参数示例：
+
+```json
+{ "query": "site:example.com 合成搜索", "count": 5 }
+```
+
+```json
+{ "url": "https://example.com/article" }
+```
+
+Search 只发送 `query` / `count`；不发送会话、`ori_question`、`localization` 或 `need_content`，沿用官方 `need_content=false`（官方 count 默认值为 10）。仅消费所需的 title/url/summary/snippet；不输出全文 content、分数或站点元数据，不对 nullable date 作无日期假设。未知输入字段拒绝，不偷偷转发。
+
+### 认证、请求与计费
+
+- 执行时从 `ctx.modelRegistry.getAll()` 选取官方 DeepSeek 模型，通过 `getApiKeyAndHeaders` 及现有 `resolveIdentity` / `officialBase` / `requestIdentity` 边界解析普通 DeepSeek Bearer；不使用当前 GPT 的凭据，也不更改当前模型。无官方模型或无 Key 时明确报错，不回退其它账户或直接读取 auth 文件。
+- 模型必须为官方 DeepSeek origin 和根路径或 `/v1`。拒绝代理模型、任何 runtime 认证目标 `baseUrl` override（包括官方地址）及冲突认证 headers；只发送解析后的 Bearer，不转发其它配置 header，不把代理 Key 发给官方服务。
+- 唯一 HTTP 目标为 `POST https://api.deepseek.com/v1/tools/search` 与 `POST https://api.deepseek.com/v1/tools/fetch`；不把原有 GET 通道泛化为任意 URL。使用 `redirect:error`、`credentials:omit`、`cache:no-store`。认证等待最多 8 秒，POST 网络请求独立限制为 30 秒，响应累计最多 1 MiB（包括无 Content-Length 的流）；严格解析 UTF-8 JSON，异常结构拒绝。
+- **标准收费：Search、Fetch 各按成功有效请求每 1000 次 5 元人民币计费**。官方限制为每个账号、每个接口各 5 QPS；不假定 Pi 享受 Claude Code、Codex 或其它集成的优惠/免单政策。
+- **不自动重放 POST**。客户端超时、取消，或响应因本地大小/JSON/结构校验限制被拒绝，均不保证服务端未成功执行或计费；需结合错误原因稍后显式重试。401 提示在 Pi 配置有效官方 Key，402 提示充值或检查账号余额，均不盲目重试；429、408、5xx 和其它请求失败均记录等待期限，只返回安全分类及 HTTP status，不回显 Key、headers、服务端 body 或错误原文。
+- 本扩展实例每端点仅 1 个在途调用，并在调用完成后至少间隔 250 ms；忙碌或受限时立即拒绝，不排队。失败从 1 秒起指数退避、最多 5 分钟，服务端 `Retry-After` 秒数/HTTP-date 可延长等待；同实例换 Key、换模型或会话不绕过端点期限，Search/Fetch 分别维护。取消不增加失败计数；不清除既有期限。不提供跨进程账号级限流保证，进程退出/扩展重载后内存状态重建。
+
+### 网页安全与输出边界
+
+- Fetch 保守拒绝所有 IPv4/IPv6 字面量（含 URL 解析规范化后的数字/十六进制/简写形式）、单段主机名、localhost、本地域名后缀和常见回环映射域名；拒绝非 HTTP(S)、userinfo、反斜杠、控制字符及明显的编码控制字符。搜索来源 URL 使用同一公开 URL 校验。来源 URL 保留完整的路径、query 和 fragment，不截断为不可用链接。
+- 实际 HTTP 仅到官方 DeepSeek，由其抓取目标网页；本机不探测 DNS、不直连目标网页、不运行页面脚本。此输入校验**不能完全防御 DNS 重绑定或识别所有解析到内网的域名，也不能控制 DeepSeek 远端重定向链**，不是远端抓取行为的安全保证。
+- 所有结果醒目标注 **UNTRUSTED EXTERNAL WEB DATA**：外部网页只作资料，不能当指令；回答须附来源。输出去除终端序列、危险控制/格式字符（保留正文换行）。
+- 截断预算：标题 512 字节/4 行、搜索摘要每条 1536 字节/40 行、抓取正文 16 KiB/400 行；会附 `[TRUNCATED]`。模型文本（含警告与截断提示）、序列化 `details` 和 `structuredContent` 各不超过 32 KiB，为文本包装预留数据预算；必要时省略整个搜索条目或缩短正文，并设置 `truncated` 和总截断提示。来源 URL 不截断；`details` 和 `structuredContent` 仅含相同的有界结果，绝不藏入完整原文。
+- 本包不自动落盘查询、网页或工具日志；正常工具参数/结果仍可能由 Pi 写入会话或由调用方记录。只读/开放网络 annotations 是行为提示，不表示免费、无隐私风险或无需审查。
+
+Search/Fetch 已通过合成凭据/mock HTTP 和真实 Pi 1.3.0 宿主验证，并完成 10 次真实 API 请求（9 次 HTTP 200、1 次预期 404），覆盖中英文、站点限定、条数、空结果、Unicode、公开网页和长文截断；另有 7 项参数/预取消验证未联网。真实样本包含同页不同 URL、旧版文档、标题与正文分离及 Markdown 标点转义；不保证结果去重、文档最新或还原网页排版。实际扣费、真实限流/超时/在途取消、模型自动选用工具和 TUI 交互未验证。测试通过不等于业务验收或完整安全保证。
 
 ## Codex Fast（仅交互 TUI）
 
@@ -91,7 +131,7 @@ balance CNY 110.00100 | USD 20.00000001 | branch: main
 
 ## 数据、安全与生命周期
 
-只在交互 TUI 当前 provider 为 `openai-codex` 或 `deepseek` 时查询：
+footer 额度/余额只在交互 TUI 当前 provider 为 `openai-codex` 或 `deepseek` 时查询（Search/Fetch 的按需 POST 见上文）：
 
 | Provider | 唯一只读 GET 地址 | 认证 |
 |---|---|---|
@@ -121,13 +161,14 @@ npm test
 npm pack --dry-run --ignore-scripts
 ```
 
-所有 HTTP/认证/账号切换测试使用合成数据和 mock，不调用真实账户接口或模型，也不开服务。持久化测试使用 `os.tmpdir()`，运行时可将 TEMP/TMP/TMPDIR 指向专用测试工作目录；测试保留生成目录。覆盖渲染与 Unicode 宽度、bar 边界、统一背景与空格、真实 Pi dark/light Theme 下的最终 footer 组合、ANSI256、主题切换、窄屏样式恢复/重置和信息保留、ctx unknown/compaction 与窗口总长度优先/回退、thinking 事件重绘、空分支与缺失窗口隐藏及分隔符、长分支在窄/普通/宽屏下全局最后且不隐藏额度/多币种余额/错误状态、单 7d/双窗口/多币种连续排列的恰好容纳与少一列边界、倒计时、账户根窗口与无关专属桶、币种精度、超时/取消/超大/错误/重定向、scope 切换和生命周期清理，以及 Fast 能力解析、仅布尔偏好保存、失败/关闭并发、多 handler 真实组合、非 TUI 隔离、请求级 A/B 身份与实际 custom endpoint、同 ID 并发、full/simple 参数及注册恢复、Retry-After/连续失败退避和恢复。真实 Pi 1.3.0 Runtime 与 compiled pi.exe 的合成请求验证均使用隔离凭据及拦截的 fetch，不产生真实服务请求。Codex 额度和 DeepSeek 余额已通过真实终端显示验证，但未与供应商页面核对。Fast 验证未查询真实 Codex 目录/账户接口，也未发送真实 Fast 模型请求；Fast 的实际可用性、速度及额度消耗均未实测，需另行验证。测试通过不代表业务验收。
+仓库内的自动化 HTTP/认证/账号切换测试使用合成数据和 mock，不调用真实账户接口或模型，也不开服务。持久化测试使用 `os.tmpdir()`，运行时可将 TEMP/TMP/TMPDIR 指向专用测试工作目录；测试保留生成目录。覆盖渲染与 Unicode 宽度、bar 边界、统一背景与空格、真实 Pi dark/light Theme 下的最终 footer 组合、ANSI256、主题切换、窄屏样式恢复/重置和信息保留、ctx unknown/compaction 与窗口总长度优先/回退、thinking 事件重绘、空分支与缺失窗口隐藏及分隔符、长分支在窄/普通/宽屏下全局最后且不隐藏额度/多币种余额/错误状态、单 7d/双窗口/多币种连续排列的恰好容纳与少一列边界、倒计时、账户根窗口与无关专属桶、币种精度、超时/取消/超大/错误/重定向、scope 切换和生命周期清理，以及 Fast 能力解析、仅布尔偏好保存、失败/关闭并发、多 handler 真实组合、非 TUI 隔离、请求级 A/B 身份与实际 custom endpoint、同 ID 并发、full/simple 参数及注册恢复、Retry-After/连续失败退避和恢复。真实 Pi 1.3.0 Runtime 与 compiled pi.exe 的合成请求验证均使用隔离凭据及拦截的 fetch，不产生真实服务请求。Codex 额度和 DeepSeek 余额已通过真实终端显示验证，但未与供应商页面核对。Fast 验证未查询真实 Codex 目录/账户接口，也未发送真实 Fast 模型请求；Fast 的实际可用性、速度及额度消耗均未实测，需另行验证。测试通过不代表业务验收。
 
 `@earendil-works/pi-coding-agent`、`pi-ai`、`pi-tui`（均为 `@earendil-works` scope）与 `typebox` 仅以 `peerDependencies: "*"` 声明；本地 devDependencies 固定宿主 1.3.0 供类型检查，不包含在发布文件中。Pi 通过自己的 loader 提供宿主模块，本包不打包宿主或其它 Pi package。没有依赖其它状态栏/usage package，因此没有额外插件自动加载或格式化状态协议耦合。
 
 ### 权威参考
 
 - [Pi packages](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md)、[Extensions](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)、[TUI](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/tui.md)；实现以安装版 1.3.0 声明为准。
+- [DeepSeek Search/Fetch 指南](https://api-docs.deepseek.com/zh-cn/guides/search/)、[Search API](https://api-docs.deepseek.com/api/search/)、[Fetch API](https://api-docs.deepseek.com/api/fetch/)
 - [DeepSeek Get User Balance](https://api-docs.deepseek.com/api/get-user-balance)
 - [OpenAI Codex backend client](https://github.com/openai/codex/blob/main/codex-rs/backend-client/src/client.rs)、[账户额度 fixture](https://github.com/openai/codex/blob/main/codex-rs/app-server/tests/suite/v2/rate_limits.rs)
 - Fast 契约（官方源码快照 `ce0323f2f2d3b25e82806cd555237da3db4e1897`）：[模型能力字段与支持判断](https://github.com/openai/codex/blob/ce0323f2f2d3b25e82806cd555237da3db4e1897/codex-rs/protocol/src/openai_models.rs)、[Fast → priority/default 映射](https://github.com/openai/codex/blob/ce0323f2f2d3b25e82806cd555237da3db4e1897/codex-rs/protocol/src/config_types.rs)、[目录 GET 协议](https://github.com/openai/codex/blob/ce0323f2f2d3b25e82806cd555237da3db4e1897/codex-rs/codex-api/src/endpoint/models.rs)、[官方 Codex base URL](https://github.com/openai/codex/blob/ce0323f2f2d3b25e82806cd555237da3db4e1897/codex-rs/model-provider-info/src/lib.rs)、[目录端点与身份隔离](https://github.com/openai/codex/blob/ce0323f2f2d3b25e82806cd555237da3db4e1897/codex-rs/model-provider/src/models_endpoint.rs)。

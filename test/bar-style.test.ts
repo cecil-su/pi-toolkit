@@ -175,7 +175,7 @@ test("real Pi dark/light Theme: final index composition preserves bright fill, m
       },
     },
   };
-  statusbar({ registerCommand() {}, on(name: string, handler: (event: unknown, context: unknown) => unknown) {
+  statusbar({ registerTool() {}, registerCommand() {}, on(name: string, handler: (event: unknown, context: unknown) => unknown) {
     const list = handlers.get(name) ?? [];
     list.push(handler);
     handlers.set(name, list);

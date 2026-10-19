@@ -226,6 +226,7 @@ function harness() {
     } },
   };
   statusbar({
+    registerTool() {},
     registerCommand() {},
     on(name: string, handler: TestHandler) {
       const list = handlers.get(name) ?? [];

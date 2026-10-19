@@ -15,7 +15,7 @@ function harness() {
   const handlers = new Map<string, Handler[]>();
   const commands = new Map<string, (args: string, ctx: ExtensionContext) => Promise<void>>();
   let registration: ProviderConfig | undefined;
-  const api = { registerProvider(_id: string, value: ProviderConfig) { registration = { ...registration, ...value }; },
+  const api = { registerTool() {}, registerProvider(_id: string, value: ProviderConfig) { registration = { ...registration, ...value }; },
     unregisterProvider() { registration = undefined; }, on(name: string, handler: Handler) {
     const list = handlers.get(name) ?? []; list.push(handler); handlers.set(name, list); return () => {};
   }, registerCommand(name: string, value: { handler: (args: string, ctx: ExtensionContext) => Promise<void> }) {
